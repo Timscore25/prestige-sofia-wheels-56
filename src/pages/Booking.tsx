@@ -20,6 +20,8 @@ const Booking = () => {
   const [searchParams] = useSearchParams();
   const [pickupDate, setPickupDate] = useState<Date>();
   const [returnDate, setReturnDate] = useState<Date>();
+  const [pickupTime, setPickupTime] = useState<string>("10:00");
+  const [returnTime, setReturnTime] = useState<string>("18:00");
   const [formData, setFormData] = useState({
     firstName: '',
     lastName: '',
@@ -110,19 +112,40 @@ const Booking = () => {
       });
       return;
     }
+
+    if (!pickupTime || (!isTransfer && returnDate && !returnTime)) {
+      toast({
+        title: "Time selection required",
+        description: isTransfer ? "Please select pickup time." : "Please select both pickup and return times.",
+        variant: "destructive"
+      });
+      return;
+    }
     
     setIsSubmitting(true);
     
     try {
+      // Helper function to combine date and time into ISO string
+      const combineDateTime = (date: Date, time: string): string => {
+        const [hours, minutes] = time.split(':');
+        const combined = new Date(date);
+        combined.setHours(parseInt(hours), parseInt(minutes), 0, 0);
+        return combined.toISOString();
+      };
+
+      // Create combined datetime strings
+      const pickupDateTime = combineDateTime(pickupDate, pickupTime);
+      const returnDateTime = returnDate && returnTime ? combineDateTime(returnDate, returnTime) : pickupDateTime;
+      
       // Calculate duration for rentals
       const durationDays = !isTransfer && returnDate 
-        ? Math.ceil((returnDate.getTime() - pickupDate.getTime()) / (1000 * 60 * 60 * 24))
+        ? Math.ceil((new Date(returnDateTime).getTime() - new Date(pickupDateTime).getTime()) / (1000 * 60 * 60 * 24))
         : 1;
       
       // Prepare reservation data
       const reservationData = {
-        pickupDate: pickupDate.toISOString(),
-        returnDate: returnDate?.toISOString() || pickupDate.toISOString(),
+        pickupDate: pickupDateTime,
+        returnDate: returnDateTime,
         vehicle: formData.vehicle,
         pickupLocation: formData.pickupLocation,
         firstName: formData.firstName,
@@ -135,10 +158,10 @@ const Booking = () => {
         summary: {
           vehicle: formData.vehicle,
           period: isTransfer 
-            ? format(pickupDate, "PPP")
+            ? `${format(pickupDate, "PPP")} at ${pickupTime}`
             : returnDate 
-              ? `${format(pickupDate, "PPP")} - ${format(returnDate, "PPP")}`
-              : format(pickupDate, "PPP"),
+              ? `${format(pickupDate, "PPP")} at ${pickupTime} - ${format(returnDate, "PPP")} at ${returnTime}`
+              : `${format(pickupDate, "PPP")} at ${pickupTime}`,
           durationDays,
           totalAmount: calculateTotal(),
           currency: 'EUR'
@@ -182,6 +205,8 @@ const Booking = () => {
         });
         setPickupDate(undefined);
         setReturnDate(undefined);
+        setPickupTime("10:00");
+        setReturnTime("18:00");
       } else {
         toast({
           title: "⚠️ Something went wrong",
@@ -223,49 +248,20 @@ const Booking = () => {
                 <h2 className="text-2xl font-bold text-primary-navy mb-4">
                   {isTransfer ? 'Transfer Details' : 'Rental Details'}
                 </h2>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
-                      {isTransfer ? 'Service Date' : 'Pick-up Date'}
-                    </label>
-                    <Popover>
-                      <PopoverTrigger asChild>
-                        <Button
-                          variant="outline"
-                          className="w-full justify-start text-left font-normal"
-                        >
-                          {pickupDate ? (
-                            format(pickupDate, "PPP")
-                          ) : (
-                            <span>Select date</span>
-                          )}
-                          <CalendarIcon className="ml-auto h-4 w-4 opacity-50" />
-                        </Button>
-                      </PopoverTrigger>
-                      <PopoverContent className="w-auto p-0" align="start">
-                        <Calendar
-                          mode="single"
-                          selected={pickupDate}
-                          onSelect={setPickupDate}
-                          initialFocus
-                          className={cn("p-3 pointer-events-auto")}
-                          disabled={(date) => date < new Date()}
-                        />
-                      </PopoverContent>
-                    </Popover>
-                  </div>
-
-                  {!isTransfer && (
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                  <div className="space-y-4">
                     <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">Return Date</label>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">
+                        {isTransfer ? 'Service Date' : 'Pick-up Date'}
+                      </label>
                       <Popover>
                         <PopoverTrigger asChild>
                           <Button
                             variant="outline"
                             className="w-full justify-start text-left font-normal"
                           >
-                            {returnDate ? (
-                              format(returnDate, "PPP")
+                            {pickupDate ? (
+                              format(pickupDate, "PPP")
                             ) : (
                               <span>Select date</span>
                             )}
@@ -275,14 +271,92 @@ const Booking = () => {
                         <PopoverContent className="w-auto p-0" align="start">
                           <Calendar
                             mode="single"
-                            selected={returnDate}
-                            onSelect={setReturnDate}
+                            selected={pickupDate}
+                            onSelect={setPickupDate}
                             initialFocus
                             className={cn("p-3 pointer-events-auto")}
-                            disabled={(date) => date < new Date() || (pickupDate && date < pickupDate)}
+                            disabled={(date) => date < new Date()}
                           />
                         </PopoverContent>
                       </Popover>
+                    </div>
+
+                    {!isTransfer && (
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">
+                          {isTransfer ? 'Service Time' : 'Pick-up Time'}
+                        </label>
+                        <Input
+                          id="pickupTime"
+                          name="pickupTime"
+                          type="time"
+                          value={pickupTime}
+                          onChange={(e) => setPickupTime(e.target.value)}
+                          className="w-full px-4 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary-gold"
+                          required={!!pickupDate}
+                        />
+                      </div>
+                    )}
+                  </div>
+
+                  {!isTransfer && (
+                    <div className="space-y-4">
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">Return Date</label>
+                        <Popover>
+                          <PopoverTrigger asChild>
+                            <Button
+                              variant="outline"
+                              className="w-full justify-start text-left font-normal"
+                            >
+                              {returnDate ? (
+                                format(returnDate, "PPP")
+                              ) : (
+                                <span>Select date</span>
+                              )}
+                              <CalendarIcon className="ml-auto h-4 w-4 opacity-50" />
+                            </Button>
+                          </PopoverTrigger>
+                          <PopoverContent className="w-auto p-0" align="start">
+                            <Calendar
+                              mode="single"
+                              selected={returnDate}
+                              onSelect={setReturnDate}
+                              initialFocus
+                              className={cn("p-3 pointer-events-auto")}
+                              disabled={(date) => date < new Date() || (pickupDate && date < pickupDate)}
+                            />
+                          </PopoverContent>
+                        </Popover>
+                      </div>
+
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">Return Time</label>
+                        <Input
+                          id="returnTime"
+                          name="returnTime"
+                          type="time"
+                          value={returnTime}
+                          onChange={(e) => setReturnTime(e.target.value)}
+                          className="w-full px-4 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary-gold"
+                          required={!!returnDate}
+                        />
+                      </div>
+                    </div>
+                  )}
+
+                  {isTransfer && (
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Service Time</label>
+                      <Input
+                        id="pickupTime"
+                        name="pickupTime"
+                        type="time"
+                        value={pickupTime}
+                        onChange={(e) => setPickupTime(e.target.value)}
+                        className="w-full px-4 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary-gold"
+                        required={!!pickupDate}
+                      />
                     </div>
                   )}
 
@@ -467,17 +541,17 @@ const Booking = () => {
                         className="font-medium" 
                         data-summary-period={
                           isTransfer 
-                            ? format(pickupDate, "PPP")
+                            ? `${format(pickupDate, "PPP")} at ${pickupTime}`
                             : returnDate 
-                              ? `${format(pickupDate, "PPP")} - ${format(returnDate, "PPP")}`
-                              : format(pickupDate, "PPP")
+                              ? `${format(pickupDate, "PPP")} at ${pickupTime} - ${format(returnDate, "PPP")} at ${returnTime}`
+                              : `${format(pickupDate, "PPP")} at ${pickupTime}`
                         }
                       >
                         {isTransfer 
-                          ? format(pickupDate, "PPP")
+                          ? `${format(pickupDate, "PPP")} at ${pickupTime}`
                           : returnDate 
-                            ? `${format(pickupDate, "PPP")} - ${format(returnDate, "PPP")}`
-                            : format(pickupDate, "PPP")
+                            ? `${format(pickupDate, "PPP")} at ${pickupTime} - ${format(returnDate, "PPP")} at ${returnTime}`
+                            : `${format(pickupDate, "PPP")} at ${pickupTime}`
                         }
                       </span>
                     </div>
