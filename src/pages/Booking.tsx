@@ -13,6 +13,7 @@ import { CalendarIcon } from "lucide-react";
 import { format } from "date-fns";
 import { cn } from "@/lib/utils";
 import { useToast } from "@/hooks/use-toast";
+import { v4 as uuidv4 } from 'uuid';
 
 const Booking = () => {
   const { toast } = useToast();
@@ -84,8 +85,23 @@ const Booking = () => {
     }
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  // Helper function to extract UTM parameters
+  const getUtmParams = () => {
+    const utmParams: Record<string, string> = {};
+    const urlParams = new URLSearchParams(window.location.search);
+    
+    for (const [key, value] of urlParams.entries()) {
+      if (key.startsWith('utm_')) {
+        utmParams[key] = value;
+      }
+    }
+    
+    return Object.keys(utmParams).length > 0 ? utmParams : undefined;
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    
     if (!pickupDate || (!isTransfer && !returnDate)) {
       toast({
         title: "Date selection required",
@@ -97,29 +113,92 @@ const Booking = () => {
     
     setIsSubmitting(true);
     
-    // Simulating form submission
-    setTimeout(() => {
-      toast({
-        title: isTransfer ? "Transfer booking submitted!" : "Booking submitted!",
-        description: "We'll confirm your reservation shortly.",
-      });
+    try {
+      // Calculate duration for rentals
+      const durationDays = !isTransfer && returnDate 
+        ? Math.ceil((returnDate.getTime() - pickupDate.getTime()) / (1000 * 60 * 60 * 24))
+        : 1;
       
-      // Reset form
-      setFormData({
-        firstName: '',
-        lastName: '',
-        email: '',
-        phone: '',
-        vehicle: '',
-        pickupLocation: 'airport',
-        dropOffLocation: '',
-        deliveryAddress: '',
-        specialRequests: ''
+      // Prepare reservation data
+      const reservationData = {
+        pickupDate: pickupDate.toISOString(),
+        returnDate: returnDate?.toISOString() || pickupDate.toISOString(),
+        vehicle: formData.vehicle,
+        pickupLocation: formData.pickupLocation,
+        firstName: formData.firstName,
+        lastName: formData.lastName,
+        email: formData.email,
+        phone: formData.phone,
+        specialRequests: formData.specialRequests || '',
+        ...(formData.deliveryAddress && { deliveryAddress: formData.deliveryAddress }),
+        ...(formData.dropOffLocation && { dropOffLocation: formData.dropOffLocation }),
+        summary: {
+          vehicle: formData.vehicle,
+          period: isTransfer 
+            ? format(pickupDate, "PPP")
+            : returnDate 
+              ? `${format(pickupDate, "PPP")} - ${format(returnDate, "PPP")}`
+              : format(pickupDate, "PPP"),
+          durationDays,
+          totalAmount: calculateTotal(),
+          currency: 'EUR'
+        },
+        metadata: {
+          reservationId: uuidv4(),
+          timestamp: new Date().toISOString(),
+          pageUrl: window.location.href,
+          referrer: document.referrer || '',
+          userAgent: navigator.userAgent,
+          utmParams: getUtmParams()
+        }
+      };
+
+      // Submit to Make.com webhook directly
+      const response = await fetch('https://hook.eu2.make.com/8usev71f3ghg1hr1kjtledtpbnhwfe5r', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(reservationData),
       });
-      setPickupDate(undefined);
-      setReturnDate(undefined);
+
+      if (response.ok) {
+        toast({
+          title: "✅ Reservation request sent",
+          description: "We'll confirm your booking shortly.",
+        });
+        
+        // Reset form on success
+        setFormData({
+          firstName: '',
+          lastName: '',
+          email: '',
+          phone: '',
+          vehicle: '',
+          pickupLocation: 'airport',
+          dropOffLocation: '',
+          deliveryAddress: '',
+          specialRequests: ''
+        });
+        setPickupDate(undefined);
+        setReturnDate(undefined);
+      } else {
+        toast({
+          title: "⚠️ Something went wrong",
+          description: "Please try again or contact support.",
+          variant: "destructive"
+        });
+      }
+    } catch (error) {
+      console.error('Reservation submission error:', error);
+      toast({
+        title: "⚠️ Something went wrong",
+        description: "Please try again or contact support.",
+        variant: "destructive"
+      });
+    } finally {
       setIsSubmitting(false);
-    }, 1500);
+    }
   };
 
   return (
@@ -210,6 +289,7 @@ const Booking = () => {
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">Vehicle Selection</label>
                     <select 
+                      id="vehicle"
                       name="vehicle"
                       value={formData.vehicle}
                       onChange={handleChange}
@@ -237,6 +317,7 @@ const Booking = () => {
                       {isTransfer ? 'Pick-up Location' : 'Pick-up Location'}
                     </label>
                     <select 
+                      id="pickupLocation"
                       name="pickupLocation"
                       value={formData.pickupLocation}
                       onChange={handleChange}
@@ -266,6 +347,7 @@ const Booking = () => {
                         Delivery Address (Sofia or Varna only)
                       </label>
                       <Input
+                        id="deliveryAddress"
                         name="deliveryAddress"
                         value={formData.deliveryAddress || ''}
                         onChange={handleChange}
@@ -297,6 +379,7 @@ const Booking = () => {
                     <div className="md:col-span-2">
                       <label className="block text-sm font-medium text-gray-700 mb-1">Drop-off Location</label>
                       <Input
+                        id="dropOffLocation"
                         name="dropOffLocation"
                         value={formData.dropOffLocation}
                         onChange={handleChange}
@@ -314,6 +397,7 @@ const Booking = () => {
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">First Name</label>
                     <Input
+                      id="firstName"
                       name="firstName"
                       value={formData.firstName}
                       onChange={handleChange}
@@ -324,6 +408,7 @@ const Booking = () => {
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">Last Name</label>
                     <Input
+                      id="lastName"
                       name="lastName"
                       value={formData.lastName}
                       onChange={handleChange}
@@ -334,6 +419,7 @@ const Booking = () => {
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">Email</label>
                     <Input
+                      id="email"
                       name="email"
                       type="email"
                       value={formData.email}
@@ -345,6 +431,7 @@ const Booking = () => {
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">Phone</label>
                     <Input
+                      id="phone"
                       name="phone"
                       type="tel"
                       value={formData.phone}
@@ -358,6 +445,7 @@ const Booking = () => {
               <div className="mb-8">
                 <label className="block text-sm font-medium text-gray-700 mb-1">Special Requests (Optional)</label>
                 <Textarea
+                  id="specialRequests"
                   name="specialRequests"
                   value={formData.specialRequests}
                   onChange={handleChange}
@@ -371,11 +459,20 @@ const Booking = () => {
                   <div className="space-y-2">
                     <div className="flex justify-between">
                       <span>Vehicle:</span>
-                      <span className="font-medium">{formData.vehicle}</span>
+                      <span className="font-medium" data-summary-vehicle={formData.vehicle}>{formData.vehicle}</span>
                     </div>
                     <div className="flex justify-between">
                       <span>{isTransfer ? 'Service Date:' : 'Rental Period:'}</span>
-                      <span className="font-medium">
+                      <span 
+                        className="font-medium" 
+                        data-summary-period={
+                          isTransfer 
+                            ? format(pickupDate, "PPP")
+                            : returnDate 
+                              ? `${format(pickupDate, "PPP")} - ${format(returnDate, "PPP")}`
+                              : format(pickupDate, "PPP")
+                        }
+                      >
                         {isTransfer 
                           ? format(pickupDate, "PPP")
                           : returnDate 
@@ -387,7 +484,10 @@ const Booking = () => {
                     {!isTransfer && returnDate && (
                       <div className="flex justify-between">
                         <span>Duration:</span>
-                        <span className="font-medium">
+                        <span 
+                          className="font-medium"
+                          data-summary-duration-days={Math.ceil((returnDate.getTime() - pickupDate.getTime()) / (1000 * 60 * 60 * 24))}
+                        >
                           {Math.ceil((returnDate.getTime() - pickupDate.getTime()) / (1000 * 60 * 60 * 24))} days
                         </span>
                       </div>
@@ -401,7 +501,7 @@ const Booking = () => {
                     <hr className="my-2" />
                     <div className="flex justify-between text-lg font-bold text-primary-navy">
                       <span>Total:</span>
-                      <span>€{calculateTotal()}</span>
+                      <span data-summary-total-amount={calculateTotal()} data-summary-currency="EUR">€{calculateTotal()}</span>
                     </div>
                   </div>
                 </div>
